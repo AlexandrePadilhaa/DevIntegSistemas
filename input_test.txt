@@ -1,0 +1,11 @@
+- Teste para G-1
+
+python cgne.py ./signal/G-1.csv 50816 1 ./matriz/H-1.csv 50816 3600 ./result/ 60 G-1
+
+- Teste para G-2
+
+python cgne.py ./signal/G-2.csv 50816 1 ./matriz/H-1.csv 50816 3600 ./result/ 60 G-2
+
+- Teste para A
+
+python cgne.py ./signal/A-60x60-1.csv 50816 1 ./matriz/H-1.csv 50816 3600 ./result/ 60 A
