@@ -26,14 +26,32 @@ def save_signal_result_to_png(signal_result: torch.Tensor, shape, path, file_nam
 
 def cgnr(H, g, epsilon=1e-6, max_rep=1000):
     Ht = H.T
-    n = H.shape[1]
     
-    f = torch.zeros(n, 1)  # Resultado inicial (f0)
+    if H.shape[0] != g.shape[0]:
+        raise ValueError(f"Tamanho incompatível: H tem {H.shape[0]} linhas, mas g tem {g.shape[0]} linhas.")
+    
+    # Cálculo do fator de redução (c)
+    c = torch.linalg.norm(Ht @ H, ord=2)
+    H = H / c  # Normaliza H para maior estabilidade numérica
+    
+    # Cálculo do coeficiente de regularização (lambda)
+    lambd = torch.max(torch.abs(Ht @ g)) * 0.10
+    HtH = Ht @ H + lambd * torch.eye(H.shape[1], device=H.device)  # Regularização
+    
+    # Aplicação do ganho de sinal (γ)
+    S, _ = g.shape
+    gamma = torch.tensor([100 + (1/20) * l * torch.sqrt(torch.tensor(float(l))) for l in range(1, S + 1)], dtype=torch.float32).view(-1, 1)
+    g = g * gamma
+    
+    f = torch.zeros(H.shape[1], 1)  # Resultado inicial (f0)
     r = g - (H @ f)  # r0
     z = Ht @ r  # z0
     p = z.clone()  # p0
     
     for i in range(max_rep):
+        if i % 10 == 0:
+            print(f"Iterações realizadas: {i}")
+        
         w = H @ p  # w_i = H p_i
         alpha = (z.T @ z) / (w.T @ w)
         
@@ -43,7 +61,10 @@ def cgnr(H, g, epsilon=1e-6, max_rep=1000):
         beta = (z_aux.T @ z_aux) / (z.T @ z)
         p_aux = z_aux + beta * p
         
-        if torch.linalg.norm(r) < epsilon:  # Critério de convergência
+        # Cálculo do erro (epsilon)
+        epsilon_i = torch.linalg.norm(r_aux) - torch.linalg.norm(r)
+        
+        if torch.linalg.norm(r_aux) < epsilon or abs(epsilon_i) < epsilon:  # Critério de convergência
             print(f"Convergiu em {i} iterações")
             f = f_aux
             break
@@ -74,6 +95,8 @@ def main(args):
         
         matriz_tensor = load_csv_to_tensor(matriz_path, expected_shape=matriz_shape, sep=",", device=device)
         print("Tensor de matriz carregado com sucesso!")
+
+        print(f"Forma de H: {matriz_tensor.shape}, Forma de g: {tensor_signal.shape}")
         
         result = cgnr(matriz_tensor, tensor_signal, epsilon=1e-6, max_rep=5000)
         save_signal_result_to_png(result, result_shape, result_path, signal_name + "-result.png")
