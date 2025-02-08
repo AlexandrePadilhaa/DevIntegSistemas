@@ -11,7 +11,7 @@ deactivate
 
 ### SERVER
 
-python server.py
+python server/server.py
 
 ### CLIENT
-python client.py
+python client/client.py

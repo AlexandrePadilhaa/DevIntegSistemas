@@ -2,28 +2,112 @@ from flask import Flask, request, jsonify
 import threading
 import torch
 import json
+from queue import Queue
+import time
+from cgnr import cgnr  # Importa os algoritmos de reconstrução
+from cgne import cgne
 
 app = Flask(__name__)
 
+# Fila global para armazenar os pedidos
+pedidos_fila = Queue()
+
+# Lock para sincronizar o acesso à fila
+fila_lock = threading.Lock()
+
+contador_id = 0
+
 def process_data(data):
-    print(data)
-    response = "Sinal recebido com sucesso!"
-    return response
-    
+    try:
+        # Extrai os dados recebidos
+        sinal = torch.tensor(data["sinal"], dtype=torch.float32)
+        algoritmo = data["algoritmo"]
+        shape = data["shape"]
+        matriz_H = torch.tensor(data["matriz"], dtype=torch.float32)
+
+        # Executa o algoritmo de reconstrução
+        if algoritmo == "cgne":
+            f = cgne(matriz_H, sinal)
+        elif algoritmo == "cgnr":
+            f = cgnr(matriz_H, sinal)
+        else:
+            raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
+
+        resultado = {
+            "imagem": f.tolist(),  # Converte a imagem para lista
+            "algoritmo": algoritmo,
+            "shape": shape,
+        }
+        with open(f"resultado_{data['id']}.json", "w") as file:
+            json.dump(resultado, file)
+
+        print(f"Reconstrução concluída para o processo {data['id']} e resultado salvo.")
+        imprimir_estado_fila()
+        return resultado
+
+    except Exception as e:
+        print(f"Erro durante o processamento: {e}")
+        raise
+
+
+def processar_fila():
+    while True:
+        # Verifica se a fila está vazia (não precisa de lock, pois Queue é thread-safe)
+        if pedidos_fila.empty():
+            #print("Fila vazia. Aguardando novos pedidos...")
+            time.sleep(10)  # Espera se a fila estiver vazia
+            continue  # Volta ao início do loop
+
+        # Remove o próximo pedido da fila (thread-safe) TODO Escolher forma de processar pedidos. Atualmente processa um de cada vez.
+        data = pedidos_fila.get()
+        print(f"Processando pedido: {data['id']}")
+
+        try:
+            # Processa os dados usando a função process_data
+            resultado = process_data(data)
+            print(f"Pedido {data['id']} processado com sucesso")
+        except Exception as e:
+            print(f"Falha ao processar pedido {data['id']}: {e}")
+        finally:
+            # Marca o pedido como concluído (thread-safe)
+            pedidos_fila.task_done()
+
+
+def imprimir_estado_fila():
+    with fila_lock:  # Bloqueia o acesso à fila
+        print("imprimir_estado_fila() acessando a fila")
+        tamanho_fila = pedidos_fila.qsize()
+        processos_na_fila = [p["id"] for p in list(pedidos_fila.queue)]
+        print(f"Tamanho da fila: {tamanho_fila}")
+        print("IDs dos processos na fila:", processos_na_fila)
+
 
 @app.route('/processar', methods=['POST'])
 def handle_client():
+    print(f"Pedido recebido!")
+    global contador_id
+
     data_str = request.get_json()  # Garante que os dados sejam interpretados como JSON
     if data_str is None:
         return jsonify({"error": "Dados inválidos ou ausentes"}), 400
     data = json.loads(data_str)
+    
 
-    # Cria uma thread para processar os dados de forma assíncrona
-    thread = threading.Thread(target=process_data, args=(data,))
-    thread.start()
+    # Adiciona um ID único ao processo
+    with fila_lock:  # Bloqueia o acesso ao contador e à fila
+        print("handle_client() acessando a fila")
+        contador_id += 1
+        data["id"] = contador_id
+        pedidos_fila.put(data)
     
-    
-    return jsonify({"message": "Dados recebidos e em processamento!"}), 202
+    imprimir_estado_fila()
+
+    return jsonify({"message": f"Dados recebidos e adicionados à fila de processamento! ID: {data['id']}"}), 202
+
+# Inicia a thread de processamento da fila
+thread_fila = threading.Thread(target=processar_fila)
+thread_fila.daemon = True  # Thread daemon para encerrar com o programa
+thread_fila.start()
 
 if __name__ == "__main__":
     app.run(host='127.0.0.1', port=5000, debug=True)

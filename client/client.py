@@ -17,7 +17,7 @@ TIPO_ALGORITMO = ["cgne", "cgnr"]
 TIPO_SINAIS = ["G-1"]
 
 sinais = {
-    "G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64}
+    "G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64, "matriz_path": "./client/data/H-1.csv", "matriz_shape": (50816, 1)}
 }
 
 # Configurar o dispositivo (CPU ou GPU)
@@ -38,10 +38,14 @@ def load_csv_to_tensor(file_path, expected_shape=None, sep=";", device=""):
 # Função que simula uma sequência de sinais
 def enviar_sinal(sinal , algoritmo):
     array_sinal = sinal["tensor"].tolist()
+    matriz_H = sinal["matriz"].tolist()
+
     data = {
-        "sinal": array_sinal,
         "algoritmo": algoritmo,
-        "shape": sinal["shape"]
+        "shape": sinal["shape"],
+        "matriz_shape": sinal["matriz_shape"],
+        "matriz": matriz_H,
+        "sinal": array_sinal
     }
     json_data = json.dumps(data)
     response = requests.post(URL, json=json_data)
@@ -60,6 +64,8 @@ def carrega_sinais():
         sinal = sinais[key]
         sinal["tensor"] = load_csv_to_tensor(sinal["path"], sinal["shape"], device=device)
         sinal["tensor"] = ganho_sinal(sinal)
+        sinal["matriz"] = load_csv_to_tensor(sinal["matriz_path"], sinal["matriz_shape"], device=device)
+
         
 
 
