@@ -1,5 +1,8 @@
+import os
 from flask import Flask, request, jsonify
 import threading
+from matplotlib import pyplot as plt
+from numpy import sqrt
 import torch
 import json
 from queue import Queue
@@ -17,21 +20,40 @@ fila_lock = threading.Lock()
 
 contador_id = 0
 
+def save_signal_result_to_png(signal_result: torch.Tensor, shape, path="./server/images/", file_name="image_result.png"):
+    os.makedirs(path, exist_ok=True) 
+    
+    matriz_image = signal_result.reshape((int(shape),int(shape))).T 
+    min_val = torch.min(matriz_image)
+    max_val = torch.max(matriz_image)
+    matriz_image = ((matriz_image - min_val) / (max_val - min_val)) * 255  
+    matriz_image = matriz_image.to("cpu")
+
+    plt.imshow(matriz_image.byte().numpy(), cmap='gray')  
+    plt.axis("off") 
+    plt.savefig(os.path.join(path, file_name), bbox_inches="tight", pad_inches=0)
+    print(f"Imagem salva em {os.path.join(path, file_name)}")
+
 def process_data(data):
     try:
         # Extrai os dados recebidos
         sinal = torch.tensor(data["sinal"], dtype=torch.float32)
         algoritmo = data["algoritmo"]
-        shape = data["shape"]
+        shape = tuple(data["shape"])
         matriz_H = torch.tensor(data["matriz"], dtype=torch.float32)
+        matriz_H_shape = tuple(data["matriz_shape"])
 
         # Executa o algoritmo de reconstrução
         if algoritmo == "cgne":
-            f = cgne(matriz_H, sinal)
+            #f = cgne(matriz_H, sinal)
+            f = cgnr(matriz_H, sinal)
         elif algoritmo == "cgnr":
             f = cgnr(matriz_H, sinal)
         else:
             raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
+        
+        #Salva a imagem
+        save_signal_result_to_png(f, sqrt(matriz_H_shape[1]), file_name=f"resultado_{data['id']}")
 
         resultado = {
             "imagem": f.tolist(),  # Converte a imagem para lista

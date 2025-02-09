@@ -14,10 +14,11 @@ URL = "http://127.0.0.1:5000/processar"
 
 TIPO_ALGORITMO = ["cgne", "cgnr"]
 
-TIPO_SINAIS = ["G-1"]
+TIPO_SINAIS = ["G-30x30-1"]
 
 sinais = {
-    "G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64, "matriz_path": "./client/data/H-1.csv", "matriz_shape": (50816, 1)}
+    #"G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64, "matriz_path": "./client/data/H-1.csv", "matriz_shape": (50816, 1)},
+    "G-30x30-1": { "name": "G-30x30-1", "path": "./client/signal/g-30x30-1.csv", "shape": (27904, 1) , "S": 436 , "N": 64, "matriz_path": "./client/data/H-2.csv", "matriz_shape": (27904, 900)}
 }
 
 # Configurar o dispositivo (CPU ou GPU)
@@ -25,7 +26,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Dispositivo: {device}")
 
 
-def load_csv_to_tensor(file_path, expected_shape=None, sep=";", device=""):
+def load_csv_to_tensor(file_path, expected_shape=None, sep=",", device=""):
     data = pd.read_csv(file_path, header=None, sep=sep)
     data = data.apply(pd.to_numeric, errors='coerce').fillna(0)
     tensor = torch.tensor(data.values, dtype=torch.float32, device=device)
