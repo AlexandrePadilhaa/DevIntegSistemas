@@ -1,4 +1,5 @@
 /venv 
-client/data
-client/images
+server/data
+server/images
+server/results
 */__pycache__

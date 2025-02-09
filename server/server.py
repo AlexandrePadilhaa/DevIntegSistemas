@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 import threading
 from matplotlib import pyplot as plt
 from numpy import sqrt
+import pandas as pd
 import torch
 import json
 from queue import Queue
@@ -19,6 +20,27 @@ pedidos_fila = Queue()
 fila_lock = threading.Lock()
 
 contador_id = 0
+
+def carregar_matriz_H(shape_sinal, matrizes_path = ".\server\data"):
+    """
+    Carrega a matriz H correta com base no shape do sinal.
+    :param shape_sinal: Shape do sinal (número de elementos).
+    :return: Matriz H carregada como um tensor PyTorch.
+    """
+    if shape_sinal == 50816:
+        caminho_H = os.path.join(matrizes_path, "H-1.csv")
+    elif shape_sinal == 27904:
+        caminho_H = os.path.join(matrizes_path, "H-2.csv")
+    else:
+        raise ValueError(f"Shape do sinal não suportado: {shape_sinal}")
+
+    try:
+        #print(f"Matriz utilizada: {caminho_H}")
+        df = pd.read_csv(caminho_H, header=None)
+        H = torch.tensor(df.values, dtype=torch.float32)
+        return H
+    except Exception as e:
+        raise ValueError(f"Erro ao carregar a matriz H: {e}")
 
 def save_signal_result_to_png(signal_result: torch.Tensor, shape, path="./server/images/", file_name="image_result.png"):
     os.makedirs(path, exist_ok=True) 
@@ -40,27 +62,25 @@ def process_data(data):
         sinal = torch.tensor(data["sinal"], dtype=torch.float32)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
-        matriz_H = torch.tensor(data["matriz"], dtype=torch.float32)
-        matriz_H_shape = tuple(data["matriz_shape"])
+        matriz_H = carregar_matriz_H(sinal.shape[0])
 
         # Executa o algoritmo de reconstrução
         if algoritmo == "cgne":
-            #f = cgne(matriz_H, sinal)
-            f = cgnr(matriz_H, sinal)
+            f = cgne(matriz_H, sinal)
         elif algoritmo == "cgnr":
             f = cgnr(matriz_H, sinal)
         else:
             raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
         
-        #Salva a imagem
-        save_signal_result_to_png(f, sqrt(matriz_H_shape[1]), file_name=f"resultado_{data['id']}")
+        # Salva a imagem
+        save_signal_result_to_png(f, sqrt(matriz_H.shape[1]), file_name=f"resultado_{data['id']}")
 
         resultado = {
             "imagem": f.tolist(),  # Converte a imagem para lista
             "algoritmo": algoritmo,
             "shape": shape,
         }
-        with open(f"resultado_{data['id']}.json", "w") as file:
+        with open(f"./server/results/resultado_{data['id']}.json", "w") as file:
             json.dump(resultado, file)
 
         print(f"Reconstrução concluída para o processo {data['id']} e resultado salvo.")
