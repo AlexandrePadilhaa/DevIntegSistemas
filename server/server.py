@@ -1,3 +1,4 @@
+import datetime
 import os
 from flask import Flask, request, jsonify
 import threading
@@ -8,6 +9,7 @@ import torch
 import json
 from queue import Queue
 import time
+import psutil
 from cgnr import cgnr  # Importa os algoritmos de reconstrução
 from cgne import cgne
 
@@ -58,13 +60,16 @@ def save_signal_result_to_png(signal_result: torch.Tensor, shape, path="./server
 
 def process_data(data):
     try:
-        # Extrai os dados recebidos
+        start_time = time.time()
+        start_datetime = datetime.date.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')
+        cpu_start = psutil.cpu_percent(interval=None)
+        mem_start = psutil.virtual_memory().used / (1024 * 1024)
+        
         sinal = torch.tensor(data["sinal"], dtype=torch.float32)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
         matriz_H = carregar_matriz_H(sinal.shape[0])
 
-        # Executa o algoritmo de reconstrução
         if algoritmo == "cgne":
             f = cgne(matriz_H, sinal)
         elif algoritmo == "cgnr":
@@ -72,20 +77,42 @@ def process_data(data):
         else:
             raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
         
-        # Salva a imagem
-        save_signal_result_to_png(f, sqrt(matriz_H.shape[1]), file_name=f"resultado_{data['id']}")
+        save_signal_result_to_png(f, sqrt(matriz_H.shape[1]), file_name=f"resultado_{data['id']}.png")
+
+        end_time = time.time()
+        end_datetime = datetime.date.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+        cpu_end = psutil.cpu_percent(interval=None)
+        mem_end = psutil.virtual_memory().used / (1024 * 1024)
 
         resultado = {
-            "imagem": f.tolist(),  # Converte a imagem para lista
             "algoritmo": algoritmo,
             "shape": shape,
+            "tempo": {
+                "inicio": start_datetime,
+                "fim": end_datetime,
+                "total_segundos": round(end_time - start_time, 2)
+            },
+            "desempenho": {
+                "cpu_uso_percentual": round((cpu_start + cpu_end) / 2, 2),
+                "memoria_mb": {
+                    "inicio": round(mem_start, 2),
+                    "fim": round(mem_end, 2),
+                    "usada": round(mem_end - mem_start, 2)
+                }
+            }
         }
+        
         with open(f"./server/results/resultado_{data['id']}.json", "w") as file:
-            json.dump(resultado, file)
+            json.dump(resultado, file, indent=4)
 
         print(f"Reconstrução concluída para o processo {data['id']} e resultado salvo.")
         imprimir_estado_fila()
         return resultado
+
+    except Exception as e:
+        print(f"Erro durante o processamento: {e}")
+        raise
+
 
     except Exception as e:
         print(f"Erro durante o processamento: {e}")
@@ -97,8 +124,8 @@ def processar_fila():
         # Verifica se a fila está vazia (não precisa de lock, pois Queue é thread-safe)
         if pedidos_fila.empty():
             #print("Fila vazia. Aguardando novos pedidos...")
-            time.sleep(10)  # Espera se a fila estiver vazia
-            continue  # Volta ao início do loop
+            time.sleep(10) 
+            continue 
 
         # Remove o próximo pedido da fila (thread-safe) TODO Escolher forma de processar pedidos. Atualmente processa um de cada vez.
         data = pedidos_fila.get()
