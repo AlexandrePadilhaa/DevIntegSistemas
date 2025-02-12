@@ -13,6 +13,10 @@ import psutil
 from cgnr import cgnr  # Importa os algoritmos de reconstrução
 from cgne import cgne
 
+########################################
+
+#Inicialização de variaveis
+
 app = Flask(__name__)
 
 # Fila global para armazenar os pedidos
@@ -21,7 +25,21 @@ pedidos_fila = Queue()
 # Lock para sincronizar o acesso à fila
 fila_lock = threading.Lock()
 
+# Configurar o dispositivo (CPU ou GPU)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Dispositivo: {device}")
+
 contador_id = 0
+
+########################################
+
+# Funções auxiliares
+
+def load_csv_to_tensor(file_path, expected_shape=None, sep=";", device=""):
+    data = pd.read_csv(file_path, header=None, sep=sep)
+    data = data.apply(pd.to_numeric, errors='coerce').fillna(0)
+    tensor = torch.tensor(data.values, dtype=torch.float32, device=device)
+    return tensor
 
 def carregar_matriz_H(shape_sinal, matrizes_path = ".\server\data"):
     """
@@ -44,40 +62,79 @@ def carregar_matriz_H(shape_sinal, matrizes_path = ".\server\data"):
     except Exception as e:
         raise ValueError(f"Erro ao carregar a matriz H: {e}")
 
-def save_signal_result_to_png(signal_result: torch.Tensor, shape, path="./server/images/", file_name="image_result.png"):
-    os.makedirs(path, exist_ok=True) 
-    
+def save_signal_result_to_png(signal_result: torch.Tensor, shape, path , file_name="image_result.png"):
     matriz_image = signal_result.reshape((int(shape),int(shape))).T 
     min_val = torch.min(matriz_image)
     max_val = torch.max(matriz_image)
     matriz_image = ((matriz_image - min_val) / (max_val - min_val)) * 255  
     matriz_image = matriz_image.to("cpu")
 
-    plt.imshow(matriz_image.byte().numpy(), cmap='gray')  
-    plt.axis("off") 
-    plt.savefig(os.path.join(path, file_name), bbox_inches="tight", pad_inches=0)
-    print(f"Imagem salva em {os.path.join(path, file_name)}")
+    plt.imsave(os.path.join(path, file_name), matriz_image.byte().numpy(), cmap='gray')
+    print(f"Imagem salva em {os.path.join(path, file_name)}") 
 
-def process_data(data):
+def imprimir_estado_fila():
+    with fila_lock:  # Bloqueia o acesso à fila
+        print("imprimir_estado_fila() acessando a fila")
+        tamanho_fila = pedidos_fila.qsize()
+        processos_na_fila = [p["id"] for p in list(pedidos_fila.queue)]
+        print(f"Tamanho da fila: {tamanho_fila}")
+        print("IDs dos processos na fila:", processos_na_fila)
+
+def adicionar_fila(id_processo):
+    with open(f"./server/processos/{id_processo}/config.json", "r") as file:
+        data = json.load(file)
+    with fila_lock:  # Bloqueia o acesso ao contador e à fila
+        print("adicionar_fila() acessando a fila")
+        pedidos_fila.put(data)
+    imprimir_estado_fila()
+
+def verifica_checksum(id_processo):
+    with open(f"./server/processos/{id_processo}/config.json", "r") as file:
+        data_config = json.load(file)
+    with open(f"./server/processos/{id_processo}/sinal.csv", "r") as file:
+        data = pd.read_csv(file, header=None)
+        data = data.apply(pd.to_numeric, errors='coerce').fillna(0)
+        tensor = torch.tensor(data.values, dtype=torch.float32)
+    checksum = torch.sum(tensor).item()
+    return checksum == data_config["checksum"]    
+    
+########################################
+
+# Processamento de pedidos
+
+def inicializar_coordenador():
+    while True:
+        # Verifica se a fila está vazia (não precisa de lock, pois Queue é thread-safe)
+        if pedidos_fila.empty():
+            time.sleep(1)
+            continue 
+
+        id_pedido = pedidos_fila.get()
+        print(f"Processando pedido {id_pedido['id']} da fila")
+        threading.Thread(target=process_pedido, args=(id_pedido,)).start()
+        
+def process_pedido(data):
     try:
+        global device
+
+        print("O id do pedido é: ", data["id"])
         start_time = time.time()
         start_datetime = datetime.date.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')
         cpu_start = psutil.cpu_percent(interval=None)
         mem_start = psutil.virtual_memory().used / (1024 * 1024)
-        
-        sinal = torch.tensor(data["sinal"], dtype=torch.float32)
+        sinal = load_csv_to_tensor(file_path=f"./server/processos/{data["id"]}/sinal.csv", device=device)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
         matriz_H = carregar_matriz_H(sinal.shape[0])
 
         if algoritmo == "cgne":
-            f = cgne(matriz_H, sinal)
+            f, numero_iteracoes = cgne(matriz_H, sinal)
         elif algoritmo == "cgnr":
-            f = cgnr(matriz_H, sinal)
+            f, numero_iteracoes= cgnr(matriz_H, sinal)
         else:
             raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
         
-        save_signal_result_to_png(f, sqrt(matriz_H.shape[1]), file_name=f"resultado_{data['id']}.png")
+        save_signal_result_to_png(f, shape=shape[0] , path=f"./server/processos/{data["id"]}/", file_name="image_result.png")
 
         end_time = time.time()
         end_datetime = datetime.date.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
@@ -87,6 +144,7 @@ def process_data(data):
         resultado = {
             "algoritmo": algoritmo,
             "shape": shape,
+            "numero_iteracoes": numero_iteracoes,
             "tempo": {
                 "inicio": start_datetime,
                 "fim": end_datetime,
@@ -102,10 +160,10 @@ def process_data(data):
             }
         }
         
-        with open(f"./server/results/resultado_{data['id']}.json", "w") as file:
+        with open(f"./server/processos/{data["id"]}/result.json", "w") as file:
             json.dump(resultado, file, indent=4)
 
-        print(f"Reconstrução concluída para o processo {data['id']} e resultado salvo.")
+        print(f"Reconstrução concluída para o processo {data["id"]} e resultado salvo.")
         imprimir_estado_fila()
         return resultado
 
@@ -113,44 +171,102 @@ def process_data(data):
         print(f"Erro durante o processamento: {e}")
         raise
 
+########################################
 
-    except Exception as e:
-        print(f"Erro durante o processamento: {e}")
-        raise
+# Rotas
 
+@app.route('/processo/receber', methods=['POST'])
+def receber_chunk():
+    
+    data_str = request.get_json()  # Garante que os dados sejam interpretados como JSON
+    if data_str is None:
+        return jsonify({"error": "Dados inválidos ou ausentes"}), 400
+    data = json.loads(data_str)
+    
+    # verifica se o processo existe
+    if not os.path.exists(f"./server/processos/{data['id']}"):
+        return jsonify({"error": "Processo não encontrado"}), 404
+ 
+    if not os.path.exists(f"./server/processos/{data['id']}/sinal.csv"):
+        with open(f"./server/processos/{data['id']}/sinal.csv", "w") as file:
+            file.write("")
+            
+    chunck = data["sinal"]
+    with open(f"./server/processos/{data['id']}/sinal.csv", "a") as file:
+        for elemento in chunck:
+            file.write(f"{elemento[0]}\n")
+        
+        
+    if data["isLast"]:
+            print(f"Último chunk recebido para o processo {data['id']}")
+            if verifica_checksum(data["id"]) == False:
+                return jsonify({"error": "Checksum inválido"}), 400
+            adicionar_fila(data["id"])
+            return jsonify({"message": "Sinal recebido com sucesso"}), 200
+    
+    return jsonify({"message": "Chunk recebido com sucesso"}), 200
 
-def processar_fila():
-    while True:
-        # Verifica se a fila está vazia (não precisa de lock, pois Queue é thread-safe)
-        if pedidos_fila.empty():
-            #print("Fila vazia. Aguardando novos pedidos...")
-            time.sleep(10) 
-            continue 
+@app.route('/processo/iniciar', methods=['POST'])
+def iniciar_processo():
+    
+    global contador_id
+    contador_id += 1
+    
+    data_str = request.get_json()  # Garante que os dados sejam interpretados como JSON
+    if data_str is None:
+        return jsonify({"error": "Dados inválidos ou ausentes"}), 400
+    data = json.loads(data_str)
+    
+    data["id"] = contador_id
+    mkdir = f"./server/processos/{contador_id}"
+    
+    # Cria a pasta do processo
+    os.makedirs(mkdir, exist_ok=True)
+    
+    # Salva o arquivo de configuração
+    with open(f"{mkdir}/config.json", "w") as file:
+        json.dump(data, file, indent=4)
+        
+    return jsonify({"message": "Processo iniciado com sucesso" , "id_processo": contador_id}), 200
 
-        # Remove o próximo pedido da fila (thread-safe) TODO Escolher forma de processar pedidos. Atualmente processa um de cada vez.
-        data = pedidos_fila.get()
-        print(f"Processando pedido: {data['id']}")
+########################################
 
-        try:
-            # Processa os dados usando a função process_data
-            resultado = process_data(data)
-            print(f"Pedido {data['id']} processado com sucesso")
-        except Exception as e:
-            print(f"Falha ao processar pedido {data['id']}: {e}")
-        finally:
-            # Marca o pedido como concluído (thread-safe)
-            pedidos_fila.task_done()
+# Inicia a thread de processamento da fila
+thread_fila = threading.Thread(target=inicializar_coordenador)
+thread_fila.daemon = True  # Thread daemon para encerrar com o programa
+thread_fila.start()
 
+if __name__ == "__main__":
+    # Deleta pasta processos no windows
+    try:
+        os.system(r"rmdir /s /q .\server\processos")
+    except:
+        pass
 
-def imprimir_estado_fila():
-    with fila_lock:  # Bloqueia o acesso à fila
-        print("imprimir_estado_fila() acessando a fila")
-        tamanho_fila = pedidos_fila.qsize()
-        processos_na_fila = [p["id"] for p in list(pedidos_fila.queue)]
-        print(f"Tamanho da fila: {tamanho_fila}")
-        print("IDs dos processos na fila:", processos_na_fila)
-
-
+    app.run(host='127.0.0.1', port=5000, debug=False)
+    
+     
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 @app.route('/processar', methods=['POST'])
 def handle_client():
     print(f"Pedido recebido!")
@@ -172,11 +288,3 @@ def handle_client():
     imprimir_estado_fila()
 
     return jsonify({"message": f"Dados recebidos e adicionados à fila de processamento! ID: {data['id']}"}), 202
-
-# Inicia a thread de processamento da fila
-thread_fila = threading.Thread(target=processar_fila)
-thread_fila.daemon = True  # Thread daemon para encerrar com o programa
-thread_fila.start()
-
-if __name__ == "__main__":
-    app.run(host='127.0.0.1', port=5000, debug=True)

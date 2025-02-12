@@ -29,9 +29,8 @@ def cgnr(H, g, max_iter=1000, tol=1e-4):
         z_next = torch.matmul(Ht, r_next)
 
         error = abs(torch.norm(r, p=2).item() - torch.norm(r_next, p=2).item())
-        print(f"i: {i} error {error} tol {tol}")
         if error < tol:
-            print("Erro menor que 1e-4")
+            numero_iteracoes = i
             break
 
         beta = torch.matmul(z_next.T, z_next) / torch.matmul(z.T, z)
@@ -40,4 +39,4 @@ def cgnr(H, g, max_iter=1000, tol=1e-4):
         z = z_next
 
     print('algoritmo CGNR finalizado.')
-    return f
+    return f, numero_iteracoes

@@ -10,15 +10,25 @@ import random
 
 
 # URL do servidor Flask
-URL = "http://127.0.0.1:5000/processar"
+URL = "http://127.0.0.1:5000/"
 
 TIPO_ALGORITMO = ["cgne", "cgnr"]
 
-TIPO_SINAIS = ["G-30x30-1"]
+TIPO_SINAIS = ["G-1","G-2","G-30x30-1", "G-30x30-2"]
+
+TIPO_SHAPE = {
+    "G-1": (60, 60),
+    "G-2": (60, 60),
+    "G-30x30-1": (30, 30),
+    "G-30x30-2": (30, 30)
+}
+
 
 sinais = {
-    #"G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
-    "G-30x30-1": { "name": "G-30x30-1", "path": "./client/signal/g-30x30-1.csv", "shape": (27904, 1) , "S": 436 , "N": 64}
+    "G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
+    "G-2": { "name": "G-2", "path": "./client/signal/G-2.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
+    "G-30x30-1": { "name": "G-30x30-1", "path": "./client/signal/g-30x30-1.csv", "shape": (27904, 1) , "S": 436 , "N": 64},
+    "G-30x30-2": { "name": "G-30x30-2", "path": "./client/signal/g-30x30-2.csv", "shape": (27904, 1) , "S": 436 , "N": 64}
 }
 
 # Configurar o dispositivo (CPU ou GPU)
@@ -36,18 +46,6 @@ def load_csv_to_tensor(file_path, expected_shape=None, sep=",", device=""):
 
     return tensor
 
-# Função que simula uma sequência de sinais
-def enviar_sinal(sinal , algoritmo):
-    array_sinal = sinal["tensor"].tolist()
-    data = {
-        "algoritmo": algoritmo,
-        "shape": sinal["shape"],
-        "sinal": array_sinal
-    }
-    json_data = json.dumps(data)
-    response = requests.post(URL, json=json_data)
-    return response.json()
-
 def ganho_sinal(sinal):
     g = sinal["tensor"]
     for c in range( sinal["N"]):
@@ -62,17 +60,86 @@ def carrega_sinais():
         sinal["tensor"] = load_csv_to_tensor(sinal["path"], sinal["shape"], device=device)
         sinal["tensor"] = ganho_sinal(sinal)
 
+# Faz um hash do sinal para garantir que o sinal não foi alterado
+def gerar_checksum(sinal):
+    return torch.sum(sinal["tensor"]).item()
+    
+
+
+def processo_enviar_sinal(data, id_processo, tipo_sinal):
+    try :
+        mkdir = f"./client/processos/{data["nome"]}/{id_processo}"
+        os.makedirs(mkdir, exist_ok=True)
         
+        sinal = sinais[tipo_sinal]
+        
+        tamanho_chuncks = len(sinal["tensor"]) // random.randint(50,100)
+        chunks = torch.split(sinal["tensor"], tamanho_chuncks)
+        for i, chunk in enumerate(chunks):
+            data = {
+                "sinal": chunk.tolist(),
+                "id": id_processo,
+                "isLast": i == len(chunks) - 1
+            }
+            json_data = json.dumps(data)
+            response = requests.post(f'{URL}/processo/receber', json=json_data)
+            if(response.status_code != 200):
+                raise Exception("Erro ao enviar chunk")
+            time.sleep(random.uniform(0.01, 0.1))
+        # print (f"Enviado sinal {sinal['name']} para o processo {id_processo}")    
+    
+    except Exception as e:
+        try:
+            path = os.path.join(".", "client", "processos", data["nome"], id_processo)
+            os.system(f"rmdir /s /q {path}")
+        except:
+            pass
+        
+        print(f"Erro ao enviar id do processo: {e}")
+        return
+
 
 
 def main():
-    carrega_sinais()
     
-    for i in range(1):
-        tipo_sinal = random.choice(TIPO_SINAIS)
-        tipo_algoritmo = random.choice(TIPO_ALGORITMO)
-        response = enviar_sinal(sinais[tipo_sinal], tipo_algoritmo)
-        print(response)
+    # Deleta pasta processos no windows
+    try:
+        os.system(r"rmdir /s /q .\client\processos")
+    except:
+        pass
+        
+    carrega_sinais()
+    processos = []
+    print("Digite o nome do cliente:")
+    nome_cliente = "juliano"# input()
+    
+    while True:
+        print("Escolha sua ação:")
+        print("1 - Enviar sinal")
+        print("2 - Pedir resultado")
+        print("3 - Sair")
+        opcao = input()
+        if(opcao == "1"):
+            tipo_sinal = random.choice(TIPO_SINAIS)
+            data = {
+                "algoritmo": random.choice(TIPO_ALGORITMO),
+                "nome": nome_cliente,
+                "checksum": gerar_checksum(sinais[tipo_sinal]),
+                "shape": TIPO_SHAPE[tipo_sinal],
+            }
+            json_data = json.dumps(data)
+            response = requests.post(f'{URL}/processo/iniciar', json=json_data)
+            if(response.status_code == 200):
+                id_processo = response.json()["id_processo"]
+                thread = torch.threading.Thread(target=processo_enviar_sinal, args=(data, id_processo, tipo_sinal))
+                thread.start()
+            else:
+                print("Erro ao iniciar envio de sinal")
+                
+        if(opcao == "2"):
+            continue
+        if(opcao == "3"):
+            sys.exit()
     
     
     

@@ -3,3 +3,5 @@ server/data
 server/images
 server/results
 */__pycache__
+/server/processos
+/client/processos
