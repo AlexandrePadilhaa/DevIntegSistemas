@@ -25,14 +25,24 @@ reset_log()
 # Fila global para armazenar os pedidos
 pedidos_fila = Queue()
 
+# Fila global para armazenar os pedidos iniciados e não recebidos
+pedidos_iniciados = Queue()
+
 # Lock para sincronizar o acesso à fila
 fila_lock = threading.Lock()
+
+# Lock para sincronizar o acesso à fila de pedidos iniciados
+fila_iniciados_lock = threading.Lock()
 
 # Lock para sincronizar acesso aos valores de uso de CPU e memória
 cpu_mem_lock = threading.Lock()
 
 # Lock para sincronizar o acesso ao contador de pedidos
 qtd_pedido_lock = threading.Lock()
+
+# Quantidade maxima de pedidos que podem ser processados ao mesmo tempo
+max_pedidos = 1
+
 
 # Configurar o dispositivo (CPU ou GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,26 +65,21 @@ def load_csv_to_tensor(file_path, expected_shape=None, sep=";", device=""):
     tensor = torch.tensor(data.values, dtype=torch.float32, device=device)
     return tensor
 
-def carregar_matriz_H(shape_sinal, matrizes_path=os.path.join("server", "data")):
+def adquiri_matriz_H(shape_sinal, matrizes_path=os.path.join("server", "data")):
     """
     Carrega a matriz H correta com base no shape do sinal.
     :param shape_sinal: Shape do sinal (número de elementos).
     :return: Matriz H carregada como um tensor PyTorch.
     """
+    global H1
+    global H2
+    
     if shape_sinal == 50816:
-        caminho_H = os.path.join(matrizes_path, "H-1.csv")
+        return H1
     elif shape_sinal == 27904:
-        caminho_H = os.path.join(matrizes_path, "H-2.csv")
+        return H2
     else:
         raise ValueError(f"Shape do sinal não suportado: {shape_sinal}")
-
-    try:
-        #print(f"Matriz utilizada: {caminho_H}")
-        df = pd.read_csv(caminho_H, header=None)
-        H = torch.tensor(df.values, dtype=torch.float32)
-        return H
-    except Exception as e:
-        raise ValueError(f"Erro ao carregar a matriz H: {e}")
 
 def save_signal_result_to_png(signal_result: torch.Tensor, shape, path , file_name="image_result.png"):
     matriz_image = signal_result.reshape((int(shape),int(shape))).T 
@@ -119,8 +124,8 @@ def verifica_situacao_servidor():
     mem_percent = psutil.virtual_memory().percent
     
     # Verifica se o uso CPU e memória estipulado está acima de 95 
-    v_estipulado_cpu = cpu_percent + (qtd_pedido_processando + 1) * media_porcentagem_cpu
-    v_estipulado_memoria = mem_percent + (qtd_pedido_processando + 1) * media_porcentagem_memoria
+    v_estipulado_cpu = cpu_percent + (qtd_pedido_processando + 1.2) * media_porcentagem_cpu 
+    v_estipulado_memoria = mem_percent + (qtd_pedido_processando + 1.2) * media_porcentagem_memoria
 
     return v_estipulado_cpu > 80 or v_estipulado_memoria > 80
     
@@ -129,11 +134,14 @@ def verifica_situacao_servidor():
 # Processamento de pedidos
 
 def inicializar_coordenador():
+    log(0, "Coordenador iniciado com sucesso!")
     num_pedidos_estipular = 3
     i = 0
     
     global media_porcentagem_cpu
     global media_porcentagem_cpu
+    
+    global max_pedidos
     
     soma_porcentagem_cpu = 0
     soma_porcentagem_memoria = 0
@@ -142,7 +150,7 @@ def inicializar_coordenador():
         
         # Verifica se a fila está vazia (não precisa de lock, pois Queue é thread-safe)
         if pedidos_fila.empty():
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue 
    
             
@@ -150,17 +158,23 @@ def inicializar_coordenador():
             with fila_lock:
                 id_pedido = pedidos_fila.get()
             i += 1
+            time.sleep(0.5)
             time_init = datetime.datetime.now()
             process_pedido(id_pedido)
             time_end = datetime.datetime.now()
+            time.sleep(0.5)
             porcentagem_cpu, porcentagem_memoria  = analisar_cpu_mem(time_init, time_end)
             soma_porcentagem_cpu += porcentagem_cpu
             soma_porcentagem_memoria += porcentagem_memoria
+            
             continue            
         
         if(i == num_pedidos_estipular):
             media_porcentagem_cpu = soma_porcentagem_cpu / num_pedidos_estipular
             media_porcentagem_memoria = soma_porcentagem_memoria / num_pedidos_estipular
+            # Calcula o número máximo de pedidos que podem ser processados com base na média de uso de CPU 
+            max_pedidos = int(100/(media_porcentagem_cpu)) * 3 + 5
+            log(0, f"O número máximo de pedidos que podem ser processados é {max_pedidos}")
             log(0, f"Porcentagem de uso de CPU Médio durante o pedido: {media_porcentagem_cpu}")
             log(0, f"Porcentagem de uso de memória Médio durante o pedido: {media_porcentagem_memoria}")
             i += 1
@@ -170,13 +184,11 @@ def inicializar_coordenador():
             id_pedido = pedidos_fila.get()
         v = True
         while verifica_situacao_servidor():
-            time.sleep(1)
+            time.sleep(0.2)
             if(v):
                 log(0, "Servidor sobrecarregado, aguardando...")
                 v = False
-            
-            
-            
+  
         threading.Thread(target=process_pedido, args=(id_pedido,)).start()
         
 def process_pedido(data):
@@ -194,7 +206,7 @@ def process_pedido(data):
         sinal = load_csv_to_tensor(file_path=f"./server/processos/{data["id"]}/sinal.csv", device=device)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
-        matriz_H = carregar_matriz_H(sinal.shape[0])
+        matriz_H = adquiri_matriz_H(sinal.shape[0])
 
         if algoritmo == "cgne":
             f, numero_iteracoes = cgne(matriz_H, sinal)
@@ -226,6 +238,8 @@ def process_pedido(data):
         imprimir_estado_fila()
         with qtd_pedido_lock:
             qtd_pedido_processando -= 1
+        with fila_iniciados_lock:
+            pedidos_iniciados.get(data)
         return resultado
        
 
@@ -233,6 +247,8 @@ def process_pedido(data):
         log(0,f"Erro durante o processamento: {e}")
         with qtd_pedido_lock:
             qtd_pedido_processando -= 1
+        with fila_iniciados_lock:
+            pedidos_iniciados.get(data)
         raise
 
 ########################################
@@ -240,30 +256,35 @@ def process_pedido(data):
 # Monitoramento
 
 def inicializar_monitoramento():
+    log(0, "Monitor iniciado com sucesso!")
     ## Essa função irá recolher dados de uso de CPU e memória
     ## e guardar em um arquivo com o tempo que foi recolhido esse dado
     ## para que possa ser feito um gráfico de uso de CPU e memória
     with open(f"./server/relatorio/monitoramento.csv", "w") as file:
             file.write("")
+    
     while True:
-        cpu_percent = psutil.cpu_percent(interval=None)
-        mem_percent = psutil.virtual_memory().percent
         with open(f"./server/relatorio/monitoramento.csv", "a") as file:
+            cpu_percent = psutil.cpu_percent(interval=None)
+            mem_percent = psutil.virtual_memory().percent
             file.write(f"{datetime.datetime.now()},{cpu_percent},{mem_percent}\n")
-        time.sleep(0.2)
-        
+        time.sleep(0.1)  
         
 def analisar_cpu_mem(time_init, time_end):
     # Deve recolher dados de uso de CPU e memória do arquivo monitoramento.csv
+    log(0, f"O tempo inicial é {time_init} e o tempo final é {time_end}")
     df = pd.read_csv(f"./server/relatorio/monitoramento.csv", header=None)
     df.columns = ["datetime", "cpu", "memoria"]
     df["datetime"] = pd.to_datetime(df["datetime"])
-     
+    # adicione 0.5 segundos para garantir que o tempo final seja incluído
+    time_init -= datetime.timedelta(seconds=0.5)
+    time_end += datetime.timedelta(seconds=0.5)
     df = df[(df["datetime"] >= time_init) & (df["datetime"] <= time_end)]
     
     porcentagem_cpu = df["cpu"].max() - df["cpu"].min()
     porcentagem_memoria = df["memoria"].max() - df["memoria"].min()
     
+    log(0, f"O minimo de uso de CPU durante o pedido: {df['cpu'].min()} e o máximo: {df['cpu'].max()}")
     log(0, f"Porcentagem de uso de CPU durante o pedido: {porcentagem_cpu}")
     log(0, f"Porcentagem de uso de memória durante o pedido: {porcentagem_memoria}")
     
@@ -277,7 +298,6 @@ def analisar_cpu_mem(time_init, time_end):
 
 @app.route('/processo/receber', methods=['POST'])
 def receber_chunk():
-    
     data_str = request.get_json()  # Garante que os dados sejam interpretados como JSON
     if data_str is None:
         return jsonify({"error": "Dados inválidos ou ausentes"}), 400
@@ -307,7 +327,11 @@ def receber_chunk():
 
 @app.route('/processo/iniciar', methods=['POST'])
 def iniciar_processo():
+    global pedidos_iniciados
+    global max_pedidos
     
+    if pedidos_iniciados.qsize() >= max_pedidos:
+        return jsonify({"error": "Número máximo de pedidos atingido"}), 400
     global contador_id
     contador_id += 1
     
@@ -328,6 +352,9 @@ def iniciar_processo():
     with open(f"{mkdir}/config.json", "w") as file:
         json.dump(data, file, indent=4)
         
+    with fila_iniciados_lock:
+        pedidos_iniciados.put(data)
+        
     return jsonify({"message": "Processo iniciado com sucesso" , "id_processo": contador_id}), 200
 
 ########################################
@@ -337,12 +364,22 @@ thread_fila = threading.Thread(target=inicializar_coordenador)
 thread_fila.daemon = True  # Thread daemon para encerrar com o programa
 thread_fila.start()
 
+
 # Inicia a thread de monitoramento
 thread_monitoramento = threading.Thread(target=inicializar_monitoramento)
 thread_monitoramento.daemon = True  # Thread daemon para encerrar com o programa
 thread_monitoramento.start()
 
-log(0, "Coordenador iniciado com sucesso!")
+
+
+try:
+    H1 = torch.tensor(pd.read_csv("server/data/H-1.csv", header=None).values, dtype=torch.float32)
+    H2 = torch.tensor(pd.read_csv("server/data/H-2.csv", header=None).values, dtype=torch.float32)
+    log(0, "Matrizes H carregadas com sucesso!")
+except Exception as e:
+    log(0, f"Erro ao carregar matriz H: {e}")
+    SystemExit(1)
+
 
 if __name__ == "__main__":
     # Deleta pasta processos no windows

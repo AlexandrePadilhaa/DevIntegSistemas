@@ -133,6 +133,8 @@ def main():
                 id_processo = response.json()["id_processo"]
                 thread = torch.threading.Thread(target=processo_enviar_sinal, args=(data, id_processo, tipo_sinal))
                 thread.start()
+            elif(response.status_code == 400):
+                print("Servidor não aceitou o sinal")
             else:
                 print("Erro ao iniciar envio de sinal")
                 
