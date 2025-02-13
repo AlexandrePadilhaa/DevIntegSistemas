@@ -5,3 +5,4 @@ server/results
 */__pycache__
 /server/processos
 /client/processos
+/server/relatorio
