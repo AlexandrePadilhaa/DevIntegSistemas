@@ -1,3 +1,4 @@
+import base64
 import datetime
 import os
 from flask import Flask, request, jsonify
@@ -202,8 +203,8 @@ def process_pedido(data):
         
         start_time = time.time()
         start_datetime = datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')
-        
-        sinal = load_csv_to_tensor(file_path=f"./server/processos/{data["id"]}/sinal.csv", device=device)
+        print(data)
+        sinal = load_csv_to_tensor(file_path=f"./server/processos/{data['id']}/sinal.csv", device=device)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
         matriz_H = adquiri_matriz_H(sinal.shape[0])
@@ -215,7 +216,7 @@ def process_pedido(data):
         else:
             raise ValueError(f"Algoritmo desconhecido: {algoritmo}")
         
-        save_signal_result_to_png(f, shape=shape[0] , path=f"./server/processos/{data["id"]}/", file_name="image_result.png")
+        save_signal_result_to_png(f, shape=shape[0] , path=f"./server/processos/{data['id']}/", file_name="image_result.png")
 
         end_time = time.time()
         end_datetime = datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
@@ -231,10 +232,10 @@ def process_pedido(data):
             }
         }
         
-        with open(f"./server/processos/{data["id"]}/result.json", "w") as file:
+        with open(f"./server/processos/{data['id']}/result.json", "w") as file:
             json.dump(resultado, file, indent=4)
 
-        log(data["id"],f"Reconstrução concluída para o processo {data["id"]} e resultado salvo.")
+        log(data["id"],f"Reconstrução concluída para o processo {data['id']} e resultado salvo.")
         imprimir_estado_fila()
         with qtd_pedido_lock:
             qtd_pedido_processando -= 1
@@ -342,8 +343,7 @@ def iniciar_processo():
     
     data["id"] = contador_id
     mkdir = f"./server/processos/{contador_id}"
-    
-    
+
     
     # Cria a pasta do processo
     os.makedirs(mkdir, exist_ok=True)
@@ -356,6 +356,154 @@ def iniciar_processo():
         pedidos_iniciados.put(data)
         
     return jsonify({"message": "Processo iniciado com sucesso" , "id_processo": contador_id}), 200
+
+def obter_processos_disponiveis():
+    processos_disponiveis = []
+    
+    if not os.path.exists("./server/processos"):
+        return processos_disponiveis
+
+    for id_processo in os.listdir("./server/processos"):
+        caminho_config = os.path.join("./server/processos", id_processo, "config.json")
+        caminho_resultado = os.path.join("./server/processos", id_processo, "result.json")
+
+        if os.path.exists(caminho_config) and os.path.exists(caminho_resultado):
+            with open(caminho_config, "r") as f:
+                try:
+                    config = json.load(f)
+                    processos_disponiveis.append({
+                        "id": config["id"],
+                        "nome": config["nome"],
+                        "algoritmo": config["algoritmo"],
+                        "shape": config["shape"]
+                    })
+                except json.JSONDecodeError:
+                    print(f"Erro ao ler config.json do processo {id_processo}")
+
+    print(f"processos_disponiveis {processos_disponiveis}")
+    return processos_disponiveis
+
+@app.route('/processo/enviar_resultado', methods=['GET'])
+def enviar_resultado():
+    """Retorna os resultados de todos os processos de um cliente, incluindo imagens se disponíveis."""
+    nome_cliente = request.args.get("nome")
+
+    print(f"Requisição recebida para enviar_resultado - Cliente: {nome_cliente}")
+
+    if not nome_cliente:
+        return jsonify({"erro": "Nome do cliente não fornecido"}), 400
+
+    caminho_base = "./server/processos/"
+
+    if not os.path.exists(caminho_base):
+        print(f"Pasta de processos não encontrada: {caminho_base}")
+        return jsonify({"erro": "Pasta de processos não encontrada"}), 500
+
+    ids_disponiveis = os.listdir(caminho_base)
+    print(f"IDs de processos encontrados: {ids_disponiveis}")
+
+    resultados = []
+
+    for process_id in ids_disponiveis:
+        caminho_config = os.path.join(caminho_base, process_id, "config.json")
+        caminho_resultado = os.path.join(caminho_base, process_id, "result.json")
+        caminho_imagem = os.path.join(caminho_base, process_id, "image_result.png")
+
+        print(f"Verificando processo {process_id}")
+        print(f" - Caminho Config: {caminho_config} - Existe? {os.path.exists(caminho_config)}")
+        print(f" - Caminho Resultado: {caminho_resultado} - Existe? {os.path.exists(caminho_resultado)}")
+        print(f" - Caminho Imagem: {caminho_imagem} - Existe? {os.path.exists(caminho_imagem)}")
+
+        if os.path.exists(caminho_config):
+            try:
+                with open(caminho_config, "r") as f:
+                    config = json.load(f)
+
+                print(f"Config carregado para processo {process_id}: {config}")
+
+                # Verifica se o processo pertence ao cliente
+                if config.get("nome") == nome_cliente:
+                    print(f"Processo {process_id} pertence ao cliente {nome_cliente}")
+
+                    resultado_data = {"id": process_id}
+
+                    if os.path.exists(caminho_resultado):
+                        with open(caminho_resultado, "r") as f:
+                            resultado = json.load(f)
+                        resultado_data["resultado"] = resultado
+                        print(f"Resultado encontrado para o processo {process_id}")
+                    else:
+                        resultado_data["status"] = "processando"
+                        print(f"Resultado ainda não disponível para o processo {process_id}")
+
+                    # Se a imagem existir, adiciona ao JSON
+                    if os.path.exists(caminho_imagem):
+                        with open(caminho_imagem, "rb") as img_file:
+                            imagem_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+                            resultado_data["imagem"] = imagem_base64
+                            print(f"Imagem do processo {process_id} anexada ao JSON.")
+
+                    resultados.append(resultado_data)
+
+            except json.JSONDecodeError as e:
+                print(f"Erro ao ler JSON para processo {process_id}: {e}")
+                return jsonify({"erro": f"Erro ao ler arquivos JSON do processo {process_id}"}), 500
+            except Exception as e:
+                print(f"Erro inesperado no processo {process_id}: {e}")
+                return jsonify({"erro": "Erro interno no servidor"}), 500
+
+    return jsonify(resultados), 200
+
+@app.route('/processo/enviar_resultado_id', methods=['GET'])
+def enviar_resultado_id():
+    """Retorna o resultado de um processo específico se estiver disponível."""
+    id_processo = request.args.get("id")
+    nome_cliente = request.args.get("nome")
+
+    if not id_processo or not nome_cliente:
+        return jsonify({"erro": "ID do processo ou nome do cliente não fornecido"}), 400
+
+    caminho_base = os.path.join("./server/processos", str(id_processo))
+    caminho_config = os.path.join(caminho_base, "config.json")
+    caminho_resultado = os.path.join(caminho_base, "result.json")
+    caminho_imagem = os.path.join(caminho_base, "image_result.png")
+
+    if not os.path.exists(caminho_config):
+        return jsonify({"erro": "Processo não encontrado"}), 404
+
+    if not os.path.exists(caminho_resultado):
+        return jsonify({"id": id_processo, "status": "processando"}), 202
+
+    try:
+        with open(caminho_config, "r") as f:
+            config = json.load(f)
+
+        if config["nome"] != nome_cliente:
+            return jsonify({"erro": "Processo não pertence ao usuário"}), 403
+
+        with open(caminho_resultado, "r") as f:
+            resultado = json.load(f)
+
+        response = {
+            "id": id_processo,
+            "resultado": resultado
+        }
+
+        if os.path.exists(caminho_imagem):
+            with open(caminho_imagem, "rb") as img_file:
+                imagem_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+                response["imagem"] = imagem_base64
+
+        return jsonify(response), 200
+
+    except json.JSONDecodeError as e:
+        return jsonify({"erro": "Erro ao ler arquivos JSON"}), 500
+
+
+# @app.route('/processo/enviar_resultado_id', methods=['GET'])
+# def enviar_resultado_id():
+#     #verifica o status de um pedido pelo id. se estiver processado, retorna os resultados
+    
 
 ########################################
 
