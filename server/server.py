@@ -44,6 +44,9 @@ qtd_pedido_lock = threading.Lock()
 # Quantidade maxima de pedidos que podem ser processados ao mesmo tempo
 max_pedidos = 1
 
+matrizes = {}
+
+TIPO_MATRIZES = ["H-1", "H-2"]
 
 # Configurar o dispositivo (CPU ou GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -66,19 +69,17 @@ def load_csv_to_tensor(file_path, expected_shape=None, sep=";", device=""):
     tensor = torch.tensor(data.values, dtype=torch.float32, device=device)
     return tensor
 
-def adquiri_matriz_H(shape_sinal, matrizes_path=os.path.join("server", "data")):
+def carrega_matrizes(shape_sinal, matrizes_path=os.path.join("server", "data")):
     """
     Carrega a matriz H correta com base no shape do sinal.
     :param shape_sinal: Shape do sinal (número de elementos).
     :return: Matriz H carregada como um tensor PyTorch.
     """
-    global H1
-    global H2
-    
+    global matrizes
     if shape_sinal == 50816:
-        return H1
+        return matrizes["H-1"]["matriz"]
     elif shape_sinal == 27904:
-        return H2
+        return matrizes["H-2"]["matriz"]
     else:
         raise ValueError(f"Shape do sinal não suportado: {shape_sinal}")
 
@@ -125,10 +126,10 @@ def verifica_situacao_servidor():
     mem_percent = psutil.virtual_memory().percent
     
     # Verifica se o uso CPU e memória estipulado está acima de 95 
-    v_estipulado_cpu = cpu_percent + (qtd_pedido_processando + 1.2) * media_porcentagem_cpu 
-    v_estipulado_memoria = mem_percent + (qtd_pedido_processando + 1.2) * media_porcentagem_memoria
+    v_estipulado_cpu = cpu_percent + (qtd_pedido_processando + 1) * media_porcentagem_cpu 
+    v_estipulado_memoria = mem_percent + (qtd_pedido_processando + 1) * media_porcentagem_memoria
 
-    return v_estipulado_cpu > 80 or v_estipulado_memoria > 80
+    return v_estipulado_cpu > 90 or v_estipulado_memoria > 95
     
 ########################################
 
@@ -207,7 +208,7 @@ def process_pedido(data):
         sinal = load_csv_to_tensor(file_path=f"./server/processos/{data['id']}/sinal.csv", device=device)
         algoritmo = data["algoritmo"]
         shape = tuple(data["shape"])
-        matriz_H = adquiri_matriz_H(sinal.shape[0])
+        matriz_H = carrega_matrizes(sinal.shape[0])
 
         if algoritmo == "cgne":
             f, numero_iteracoes = cgne(matriz_H, sinal)
@@ -271,9 +272,9 @@ def inicializar_monitoramento():
             file.write(f"{datetime.datetime.now()},{cpu_percent},{mem_percent}\n")
         time.sleep(0.1)  
         
-def analisar_cpu_mem(time_init, time_end):
+def analisar_cpu_mem(time_init, time_end, logs = True):
     # Deve recolher dados de uso de CPU e memória do arquivo monitoramento.csv
-    log(0, f"O tempo inicial é {time_init} e o tempo final é {time_end}")
+    
     df = pd.read_csv(f"./server/relatorio/monitoramento.csv", header=None)
     df.columns = ["datetime", "cpu", "memoria"]
     df["datetime"] = pd.to_datetime(df["datetime"])
@@ -284,10 +285,11 @@ def analisar_cpu_mem(time_init, time_end):
     
     porcentagem_cpu = df["cpu"].max() - df["cpu"].min()
     porcentagem_memoria = df["memoria"].max() - df["memoria"].min()
-    
-    log(0, f"O minimo de uso de CPU durante o pedido: {df['cpu'].min()} e o máximo: {df['cpu'].max()}")
-    log(0, f"Porcentagem de uso de CPU durante o pedido: {porcentagem_cpu}")
-    log(0, f"Porcentagem de uso de memória durante o pedido: {porcentagem_memoria}")
+    if logs:
+        log(0, f"O tempo inicial é {time_init} e o tempo final é {time_end}")
+        log(0, f"O minimo de uso de CPU durante o pedido: {df['cpu'].min()} e o máximo: {df['cpu'].max()}")
+        log(0, f"Porcentagem de uso de CPU durante o pedido: {porcentagem_cpu}")
+        log(0, f"Porcentagem de uso de memória durante o pedido: {porcentagem_memoria}")
     
     return porcentagem_cpu, porcentagem_memoria
     
@@ -532,9 +534,25 @@ thread_monitoramento.start()
 
 
 try:
-    H1 = torch.tensor(pd.read_csv("server/data/H-1.csv", header=None).values, dtype=torch.float32)
-    H2 = torch.tensor(pd.read_csv("server/data/H-2.csv", header=None).values, dtype=torch.float32)
-    log(0, "Matrizes H carregadas com sucesso!")
+    for tipo_matriz in TIPO_MATRIZES:
+        matrizes[tipo_matriz] = {}
+        time_init = datetime.datetime.now()
+        time.sleep(0.2)
+        matrizes[tipo_matriz]["matriz"] = torch.tensor(pd.read_csv(f"server/data/{tipo_matriz}.csv", header=None).values, dtype=torch.float32)
+        time.sleep(0.2)
+        time_end = datetime.datetime.now()
+        # verifica a quantidade de memória usada para carregar a matriz de acordo com o arquivo monitoramento.csv
+        
+        cpu_utilizada, memoria_utilizada = analisar_cpu_mem(time_init, time_end, False)
+        
+        log(0, f"Uso de memória para carregar matriz {tipo_matriz}: {memoria_utilizada}")
+
+        matrizes[tipo_matriz]["memoria"] = memoria_utilizada
+        
+        log(0, "Matrizes H carregadas com sucesso!")
+        
+        
+        
 except Exception as e:
     log(0, f"Erro ao carregar matriz H: {e}")
     SystemExit(1)

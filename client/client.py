@@ -18,21 +18,25 @@ URL = "http://127.0.0.1:5000/"
 
 TIPO_ALGORITMO = ["cgne", "cgnr"]
 
-TIPO_SINAIS = ["G-1","G-2","G-30x30-1", "G-30x30-2"]
+TIPO_SINAIS = ["G-1","G-2","G-30x30-1", "G-30x30-2", "A-60x60-1", "A-30x30-1"]
 
 TIPO_SHAPE = {
     "G-1": (60, 60),
     "G-2": (60, 60),
     "G-30x30-1": (30, 30),
-    "G-30x30-2": (30, 30)
+    "G-30x30-2": (30, 30),
+    "A-60x60-1": (60, 60),
+    "A-30x30-1": (30, 30),
 }
 
 
 sinais = {
     "G-1": { "name": "G-1", "path": "./client/signal/G-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
     "G-2": { "name": "G-2", "path": "./client/signal/G-2.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
+    "A-60x60-1": { "name": "A-60x60-1", "path": "./client/signal/a-60x60-1.csv", "shape": (50816, 1) , "S": 794 , "N": 64},
     "G-30x30-1": { "name": "G-30x30-1", "path": "./client/signal/g-30x30-1.csv", "shape": (27904, 1) , "S": 436 , "N": 64},
-    "G-30x30-2": { "name": "G-30x30-2", "path": "./client/signal/g-30x30-2.csv", "shape": (27904, 1) , "S": 436 , "N": 64}
+    "G-30x30-2": { "name": "G-30x30-2", "path": "./client/signal/g-30x30-2.csv", "shape": (27904, 1) , "S": 436 , "N": 64},
+    "A-30x30-1": { "name": "A-30x30-1", "path": "./client/signal/a-30x30-1.csv", "shape": (27904, 1) , "S": 436 , "N": 64},
 }
 
 # Configurar o dispositivo (CPU ou GPU)
@@ -290,6 +294,10 @@ def gerar_relatorio(caminho, id_arquivo):
         img_width = pdf.w / 2
         img_x = (pdf.w - img_width) / 2
         pdf.image(image_path, x=img_x, w=img_width)
+        
+        # Adicionar imagem de maneira que o redimensionamento seja lossy (sem manter a proporção)
+        
+        
         
         
         # Salvar PDF
