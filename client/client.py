@@ -1,3 +1,4 @@
+import base64
 import datetime
 import requests
 import time
@@ -8,6 +9,7 @@ import pandas as pd
 import json
 import numpy as np
 import random
+from fpdf import FPDF
 
 
 # URL do servidor Flask
@@ -65,7 +67,6 @@ def carrega_sinais():
 def gerar_checksum(sinal):
     return torch.sum(sinal["tensor"]).item()
     
-
 
 def processo_enviar_sinal(data, id_processo, tipo_sinal):
     try :
@@ -186,11 +187,115 @@ def salvar_resultados(nome_usuario, processos):
                         pass  # Se der erro ao ler, mantém o valor padrão
 
             # Atualiza "data_resposta" 
+            status_data["status"] = "recebido"
             status_data["data_resposta"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             
             with open(caminho_status, "w", encoding="utf-8") as f:
                 json.dump(status_data, f, ensure_ascii=False, indent=4)
             print(f"Status atualizado em {caminho_status}")
+
+            salvar_base64_como_png(processo.get("imagem"),processo_dir,f"imagem_{processo_id}")
+            gerar_relatorio(processo_dir,processo_id)
+
+
+def salvar_base64_como_png(base64_string, diretorio, nome_arquivo):
+
+    try:
+        os.makedirs(diretorio, exist_ok=True)
+
+        caminho_arquivo = os.path.join(diretorio, f"{nome_arquivo}.png")
+        imagem_bytes = base64.b64decode(base64_string)
+        
+        with open(caminho_arquivo, "wb") as imagem_arquivo:
+            imagem_arquivo.write(imagem_bytes)
+        
+        print(f"Imagem salva com sucesso em {caminho_arquivo}")
+    except Exception as e:
+        print(f"Erro ao salvar a imagem: {e}")
+
+
+def gerar_relatorio(caminho, id_arquivo):
+    """
+    Gera um relatório em PDF reunindo as informações dos arquivos JSON e a imagem.
+    
+    :param caminho: Caminho onde os arquivos estão armazenados
+    :param id_arquivo: ID do arquivo a ser processado
+    """
+    try:
+        json_path = os.path.join(caminho, f"{id_arquivo}.json")
+        status_path = os.path.join(caminho, "status.json")
+        image_path = os.path.join(caminho, f"imagem_{id_arquivo}.png")
+        pdf_path = os.path.join(caminho, f"relatorio_{id_arquivo}.pdf")
+
+        # Verificar se os arquivos existem
+        if not all(os.path.exists(p) for p in [json_path, status_path, image_path]):
+            raise FileNotFoundError("Um ou mais arquivos necessários não foram encontrados.")
+        
+        # Carregar JSON principal
+        with open(json_path, "r", encoding="utf-8") as f:
+            dados_json = json.load(f)
+
+        # Carregar JSON de status
+        with open(status_path, "r", encoding="utf-8") as f:
+            status_json = json.load(f)
+        
+        # Criar o PDF
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_font("Arial", style="B", size=16)
+        pdf.cell(200, 10, "Relatório de Processamento", ln=True, align="C")
+        pdf.ln(10)
+        
+        # Informações do Cliente
+        pdf.set_font("Arial", style="B", size=14)
+        pdf.cell(200, 10, "Informações do Cliente:", ln=True)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, f"ID do Processo: {status_json['id_processo']}", ln=True)
+        pdf.cell(200, 10, f"Nome do Cliente: {status_json['nome_cliente']}", ln=True)
+        pdf.cell(200, 10, f"Tipo de Sinal: {status_json['tipo_sinal']}", ln=True)
+        pdf.cell(200, 10, f"Algoritmo: {status_json['algoritmo']}", ln=True)
+        pdf.ln(5)
+        
+        # Informações do Servidor
+        pdf.set_font("Arial", style="B", size=14)
+        pdf.cell(200, 10, "Informações do Servidor:", ln=True)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, f"Checksum: {status_json['checksum']}", ln=True)
+        pdf.cell(200, 10, f"Shape: {status_json['shape']}", ln=True)
+        pdf.cell(200, 10, f"Status: {status_json['status']}", ln=True)
+        pdf.cell(200, 10, f"Chunks Enviados: {status_json['chunks_enviados']}/{status_json['total_chunks']}", ln=True)
+        pdf.cell(200, 10, f"Data de Criação: {status_json['data_criacao']}", ln=True)
+        pdf.cell(200, 10, f"Data de Envio: {status_json['data_envio']}", ln=True)
+        pdf.cell(200, 10, f"Data de Resposta: {status_json['data_resposta']}", ln=True)
+        pdf.ln(5)
+        
+        # Resultados
+        pdf.set_font("Arial", style="B", size=14)
+        pdf.cell(200, 10, "Resultados:", ln=True)
+        pdf.set_font("Arial", size=12)
+        resultado = dados_json['resultado']
+        pdf.cell(200, 10, f"Número de Iterações: {resultado['numero_iteracoes']}", ln=True)
+        pdf.cell(200, 10, f"Shape: {resultado['shape']}", ln=True)
+        pdf.cell(200, 10, f"Tempo de Início: {resultado['tempo']['inicio']}", ln=True)
+        pdf.cell(200, 10, f"Tempo de Fim: {resultado['tempo']['fim']}", ln=True)
+        pdf.cell(200, 10, f"Tempo Total: {resultado['tempo']['total_segundos']} segundos", ln=True)
+        pdf.ln(10)
+        
+        # Adicionar imagem ao PDF
+        pdf.set_font("Arial", style="B", size=14)
+        pdf.cell(200, 10, "Imagem Resultado:", ln=True, align="C")
+        pdf.ln(5)
+        img_width = pdf.w / 2
+        img_x = (pdf.w - img_width) / 2
+        pdf.image(image_path, x=img_x, w=img_width)
+        
+        
+        # Salvar PDF
+        pdf.output(pdf_path)
+        print(f"Relatório gerado com sucesso: {pdf_path}")
+    except Exception as e:
+        print(f"Erro ao gerar relatório: {e}")
 
 
 def main():

@@ -202,7 +202,7 @@ def process_pedido(data):
         global device
         
         start_time = time.time()
-        start_datetime = datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S')
+        start_datetime = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         print(data)
         sinal = load_csv_to_tensor(file_path=f"./server/processos/{data['id']}/sinal.csv", device=device)
         algoritmo = data["algoritmo"]
@@ -219,7 +219,7 @@ def process_pedido(data):
         save_signal_result_to_png(f, shape=shape[0] , path=f"./server/processos/{data['id']}/", file_name="image_result.png")
 
         end_time = time.time()
-        end_datetime = datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+        end_datetime = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         resultado = {
             "algoritmo": algoritmo,
