@@ -1,7 +1,7 @@
 import base64
 import datetime
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, send_file
 import threading
 from matplotlib import pyplot as plt
 from numpy import sqrt
@@ -500,10 +500,21 @@ def enviar_resultado_id():
         return jsonify({"erro": "Erro ao ler arquivos JSON"}), 500
 
 
-# @app.route('/processo/enviar_resultado_id', methods=['GET'])
-# def enviar_resultado_id():
-#     #verifica o status de um pedido pelo id. se estiver processado, retorna os resultados
+@app.route('/processo/relatorio', methods=['GET'])
+def enviar_relatorio():
+    diretorio = os.path.abspath("./server/relatorio")
+    arquivo = "monitoramento.csv"
+    caminho_arquivo = os.path.join(diretorio, arquivo)
+    print(f"Verificando arquivo em: {caminho_arquivo}")  # Depuração
     
+    if not os.path.exists(caminho_arquivo):
+        return {"erro": "Arquivo não encontrado"}, 404
+    
+    return send_file(caminho_arquivo, as_attachment=True)
+
+# @app.route('/processo/relatorio', methods=['GET'])
+# def enviar_relatorio():
+#     return "Rota funcionando", 200
 
 ########################################
 

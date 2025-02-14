@@ -10,9 +10,6 @@ import json
 from queue import Queue
 import time
 import psutil
-from cgnr import cgnr  # Importa os algoritmos de reconstrução
-from cgne import cgne
-from log import log, reset_log
 
 
 def plotar_grafico(file_path):
@@ -37,12 +34,12 @@ def plotar_grafico(file_path):
         ax[1].set_ylabel("Memória (%)")
         ax[1].set_xlabel("Tempo")
         ax[1].legend()
-        if not os.path.exists("./server/relatorio"):
-            os.mkdir("./server/relatorio")
+        if not os.path.exists("./client/monitoramento/"):
+            os.mkdir("./client/monitoramento/")
         plt.tight_layout()
-        plt.savefig(f"./server/relatorio/monitoramento.png")
+        plt.savefig(f"./client/monitoramento/monitoramento.png")
     except Exception as e:
-        log(0,f"Erro ao plotar gráfico: {e}")
+        print(f"Erro ao plotar gráfico: {e}")
         raise
     
     

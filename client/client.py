@@ -10,6 +10,7 @@ import json
 import numpy as np
 import random
 from fpdf import FPDF
+from relatorio_geral import plotar_grafico
 
 
 # URL do servidor Flask
@@ -297,6 +298,39 @@ def gerar_relatorio(caminho, id_arquivo):
     except Exception as e:
         print(f"Erro ao gerar relatório: {e}")
 
+def baixar_relatorio_geral(response, destino):
+    if response.status_code == 200:
+        with open(destino, "wb") as f:
+            f.write(response.content)
+        print(f"Arquivo salvo em {destino}")
+        gerar_relatorio_geral()
+    else:
+        erro_msg = f"Erro ao baixar o relatório. Código: {response.status_code}, Resposta: {response.text}"
+        print(erro_msg)
+
+def gerar_relatorio_geral():
+    plotar_grafico("./client/monitoramento/monitoramento.csv")
+    
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", style='B', size=16)
+    pdf.cell(200, 10, "Monitoramento de CPU e Memória", ln=True, align='C')
+    pdf.ln(10)
+    
+    caminho_imagem = "./client/monitoramento/monitoramento.png"
+    caminho_pdf = "./client/monitoramento/relatorio_monitoramento.pdf"
+
+    if os.path.exists(caminho_imagem):
+        pdf.image(caminho_imagem, x=10, y=None, w=190)
+    else:
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, "Erro: Imagem não encontrada", ln=True, align='C')
+    
+    pdf.output(caminho_pdf)
+    print(f"Relatório salvo em: {caminho_pdf}")
+
+
 
 def main():
     
@@ -314,7 +348,8 @@ def main():
         print("Escolha sua ação:")
         print("1 - Enviar sinal")
         print("2 - Pedir resultado")
-        print("3 - Sair")
+        print("3 - Gerar relatório geral")
+        print("4 - Sair")
         opcao = input()
         if(opcao == "1"):
             tipo_sinal = random.choice(TIPO_SINAIS)
@@ -370,6 +405,10 @@ def main():
                     print("ID não encontrado ou erro ao buscar resultado.")
         
         elif opcao == "3":
+            response = requests.get(f"{URL}/processo/relatorio")
+            baixar_relatorio_geral(response, "./client/monitoramento/monitoramento.csv")
+
+        elif opcao == "4":
             sys.exit()
         else:
             print("Opção inválida. Tente novamente.")
