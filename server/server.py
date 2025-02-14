@@ -175,7 +175,7 @@ def inicializar_coordenador():
             media_porcentagem_cpu = soma_porcentagem_cpu / num_pedidos_estipular
             media_porcentagem_memoria = soma_porcentagem_memoria / num_pedidos_estipular
             # Calcula o número máximo de pedidos que podem ser processados com base na média de uso de CPU 
-            max_pedidos = int(100/(media_porcentagem_cpu)) * 3 + 5
+            max_pedidos = int(100/(media_porcentagem_cpu)) * 3 
             log(0, f"O número máximo de pedidos que podem ser processados é {max_pedidos}")
             log(0, f"Porcentagem de uso de CPU Médio durante o pedido: {media_porcentagem_cpu}")
             log(0, f"Porcentagem de uso de memória Médio durante o pedido: {media_porcentagem_memoria}")

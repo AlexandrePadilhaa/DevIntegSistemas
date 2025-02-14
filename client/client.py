@@ -67,12 +67,11 @@ def carrega_sinais():
         sinal = sinais[key]
         sinal["tensor"] = load_csv_to_tensor(sinal["path"], sinal["shape"], device=device)
         sinal["tensor"] = ganho_sinal(sinal)
-
+        
 # Faz um hash do sinal para garantir que o sinal não foi alterado
 def gerar_checksum(sinal):
     return torch.sum(sinal["tensor"]).item()
     
-
 def processo_enviar_sinal(data, id_processo, tipo_sinal):
     try :
         pasta_processo = f"./client/processos/{data['nome']}/{id_processo}"
@@ -81,7 +80,7 @@ def processo_enviar_sinal(data, id_processo, tipo_sinal):
         
         sinal = sinais[tipo_sinal]
         
-        tamanho_chuncks = len(sinal["tensor"]) // random.randint(50,100)
+        tamanho_chuncks = len(sinal["tensor"]) // random.randint(10,30)
         chunks = torch.split(sinal["tensor"], tamanho_chuncks)
 
         status_processo = {
@@ -160,7 +159,6 @@ def obter_processos_enviados(nome_cliente):
     print(f"processos: {processos_enviados}")
     return processos_enviados
 
-
 def salvar_resultados(nome_usuario, processos):
     base_dir = f"client/processos/{nome_usuario}"
     os.makedirs(base_dir, exist_ok=True)
@@ -202,7 +200,6 @@ def salvar_resultados(nome_usuario, processos):
             salvar_base64_como_png(processo.get("imagem"),processo_dir,f"imagem_{processo_id}")
             gerar_relatorio(processo_dir,processo_id)
 
-
 def salvar_base64_como_png(base64_string, diretorio, nome_arquivo):
 
     try:
@@ -217,7 +214,6 @@ def salvar_base64_como_png(base64_string, diretorio, nome_arquivo):
         print(f"Imagem salva com sucesso em {caminho_arquivo}")
     except Exception as e:
         print(f"Erro ao salvar a imagem: {e}")
-
 
 def gerar_relatorio(caminho, id_arquivo):
     """
